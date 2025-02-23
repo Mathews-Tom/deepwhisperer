@@ -14,16 +14,33 @@
 
 ---
 
+## Prerequisite - Create a Telegram Bot
+
+1. Open Telegram App on your device
+2. Search @BotFather and click/tap on it and send the message ‘/start’.
+
+![Search for @BotFather](assets/1.webp)
+
+3. Then you will receive a message from BotFather
+
+4. Send ‘/newbot’ and then follow the instructions given by BotFather.
+
+5. Send ‘/token’ to get HTTP API access token.
+
+![Create new bot](assets/2.webp)
+
 ## Installation
 
 ### **Using pip (Recommended)**
+
 ```sh
 pip install deepwhisperer
 ```
 
 ### **From Source**
+
 ```sh
-git clone https://github.com/yourusername/deepwhisperer.git
+gh repo clone Mathews-Tom/deepwhisperer
 cd deepwhisperer
 pip install -e .
 ```
@@ -33,6 +50,7 @@ pip install -e .
 ## Usage
 
 ### **1️⃣ Initializing DeepWhisperer**
+
 ```python
 from deepwhisperer import DeepWhisperer
 
@@ -41,6 +59,7 @@ notifier.send_message("Hello, Telegram!")
 ```
 
 ### **2️⃣ Using the Decorator for Function Execution Notifications**
+
 ```python
 from deepwhisperer import DeepWhisperer, deepwhisper_sentinel
 
@@ -56,6 +75,7 @@ process_data()
 ```
 
 ### **3️⃣ Sending Different Types of Messages**
+
 ```python
 # Sending a photo
 notifier.send_photo("path/to/photo.jpg", caption="Look at this!")
@@ -75,6 +95,7 @@ notifier.send_video("path/to/video.mp4", caption="Watch this!")
 ## Configuration & Parameters
 
 ### **DeepWhisperer Class Arguments**
+
 | Parameter          | Type     | Default | Description |
 |-------------------|---------|---------|-------------|
 | `access_token`    | `str`   | Required | Telegram Bot API token |
@@ -86,6 +107,7 @@ notifier.send_video("path/to/video.mp4", caption="Watch this!")
 | `batch_interval`  | `int`   | `15`     | Time window for batching text messages |
 
 ### **Decorator Parameters (`deepwhisper_sentinel`)**
+
 | Parameter             | Type           | Default  | Description |
 |----------------------|---------------|----------|-------------|
 | `notifier`           | `DeepWhisperer` | Required | Instance of `DeepWhisperer` |
@@ -94,26 +116,29 @@ notifier.send_video("path/to/video.mp4", caption="Watch this!")
 ---
 
 ## Dependencies
+
 DeepWhisperer requires the following dependencies, which are automatically installed:
+
 ```toml
 [dependencies]
-httpx = "*"  # Handles Telegram API requests
+httpx = "*"  # Handles Telegram API reques
 cachetools = "*"  # Provides TTLCache for duplicate prevention
 ```
 
 ---
 
 ## Code Structure
-To improve efficiency, helper functions have been refactored into `_helpers.py`.
+
 ```plaintext
 deepwhisperer/
 │── __init__.py
 │── deepwhisperer.py  # Core class
-│── _helpers.py       # Internal helper functions
 │── decorators.py     # Function execution notifier
 │── constants.py      # Store class-wide constants
 │── tests/            # Test cases
+│   ├── __init__.py
 │   ├── test_deepwhisperer.py
+│   ├── test_decorators.py    
 │── pyproject.toml    # Project metadata
 │── README.md         # Documentation
 │── LICENSE           # License file
@@ -122,10 +147,10 @@ deepwhisperer/
 
 ---
 
-
 ## License
+
 This project is licensed under the **MIT License**. See `LICENSE` for details.
 
-
 ## Author
+
 [Tom Mathews](https://github.com/Mathews-Tom)
