@@ -1,9 +1,11 @@
 # DeepWhisperer
 
 ## Overview
+
 **DeepWhisperer** is a Python package for sending **Telegram notifications asynchronously** with advanced message handling. It provides a queue-based, non-blocking mechanism to send messages, images, documents, and other media via Telegram.
 
 ### **Key Features**
+
 - 🚀 **Asynchronous message handling** via background processing
 - 🔁 **Retry logic** with exponential backoff for failed messages
 - 🔄 **Duplicate message filtering** using a TTL-based cache
@@ -17,17 +19,17 @@
 ## Prerequisite - Create a Telegram Bot
 
 1. Open Telegram App on your device
-2. Search @BotFather and click/tap on it and send the message ‘/start’.
+2. Search @BotFather and click/tap on it and send the message `/start`.
 
-![Search for @BotFather](assets/1.webp)
+    ![Search for @BotFather](assets/1.webp)
 
 3. Then you will receive a message from BotFather
 
-4. Send ‘/newbot’ and then follow the instructions given by BotFather.
+4. Send `/newbot` and then follow the instructions given by BotFather.
 
-5. Send ‘/token’ to get HTTP API access token.
+5. Send `/token` to get HTTP API access token.
 
-![Create new bot](assets/2.webp)
+    ![Create new bot](assets/2.webp)
 
 ## Installation
 
