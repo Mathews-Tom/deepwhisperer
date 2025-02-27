@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from deepwhisperer import DeepWhisperer, deepwhisper_sentinel
+from deepwhisperer import DeepWhisperer, deepwhisperer_sentinel
 
 
 @pytest.fixture
@@ -12,10 +12,10 @@ def mock_notifier():
     return notifier
 
 
-def test_deepwhisper_sentinel_decorator(mock_notifier):
+def test_deepwhisperer_sentinel_decorator(mock_notifier):
     """Test the decorator's behavior on function execution success."""
 
-    @deepwhisper_sentinel(mock_notifier, default_description="Sample Task")
+    @deepwhisperer_sentinel(mock_notifier, default_description="Sample Task")
     def sample_function():
         return "Success"
 
@@ -30,10 +30,10 @@ def test_deepwhisper_sentinel_decorator(mock_notifier):
     assert result == "Success"
 
 
-def test_deepwhisper_sentinel_decorator_exception(mock_notifier):
+def test_deepwhisperer_sentinel_decorator_exception(mock_notifier):
     """Test the decorator's behavior when an exception occurs."""
 
-    @deepwhisper_sentinel(mock_notifier, default_description="Error Task")
+    @deepwhisperer_sentinel(mock_notifier, default_description="Error Task")
     def failing_function():
         raise ValueError("Test Error")
 
