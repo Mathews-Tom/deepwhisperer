@@ -2,34 +2,42 @@
 
 ## Overview
 
-**DeepWhisperer** is a Python package for sending **Telegram notifications asynchronously** with advanced message handling. It provides a queue-based, non-blocking mechanism to send messages, images, documents, and other media via Telegram.
+**DeepWhisperer** is a Python package for sending **Telegram notifications asynchronously** with advanced message handling. It provides a queue-based, non-blocking mechanism to send messages, images, documents, and other media via Telegram. The package is designed to enhance the monitoring and communication of long-running tasks, ensuring efficient and reliable notifications without interrupting the main program flow.
 
 ### **Key Features**
 
-- 🚀 **Asynchronous message handling** via background processing
-- 🔁 **Retry logic** with exponential backoff for failed messages
-- 🔄 **Duplicate message filtering** using a TTL-based cache
-- 📦 **Queue overflow handling** to prevent excessive accumulation
-- 📢 **Message batching** to reduce API calls
-- 🖼 **Support for multiple media types** (photos, videos, audio, documents)
-- ✅ **Function Execution Notification Decorator** (`deepwhisper_sentinel`)
+- **🚀 Asynchronous Message Handling**: Messages are queued and processed in the background, allowing the main program to continue execution without waiting for notifications.
+
+- **📦 Batch Processing with Configurable Interval**: Messages received within a specified time window (default: 10 seconds) are combined into a single message, reducing message spam and improving readability.
+
+- **🔄 Retry Mechanism**: Failed messages are automatically retried using exponential backoff, enhancing reliability under unstable network conditions.
+
+- **🚫 Duplicate Message Filtering**: Prevents sending identical messages within a configurable time-to-live (TTL) period, reducing redundancy.
+
+- **⚠️ Queue Overflow Handling**: Limits the queue size to prevent excessive memory usage, gracefully handling overflow scenarios by discarding excess messages.
+
+- **📷 Rich Media Support**: Supports sending images and documents alongside text messages, enabling seamless sharing of visual results or files.
+
+- **✅ Function Execution Notification Decorator** (`deepwhisperer_sentinel`): Simplifies integrating Telegram notifications into your existing functions. The `deepwhisperer_sentinel` decorator automatically sends notifications when a function starts, completes successfully, or encounters an error. ing tasks.
 
 ---
 
 ## Prerequisite - Create a Telegram Bot
 
-1. Open Telegram App on your device
-2. Search @BotFather and click/tap on it and send the message `/start`.
+1. Open Telegram App on your device - To create a Telegram bot, you'll need to have the Telegram app installed on your computer. If you don't have it already, you can download it from the Telegram website.
+2. Connect to BotFather - BotFather is a bot created by Telegram that allows you to create and manage your own bots. To connect to [BotFather](https://telegram.me/BotFather), search for `@BotFather` in the Telegram app and click on the result to start a conversation.
 
-    ![Search for @BotFather](assets/1.webp)
+    ![Search for @BotFather](https://raw.githubusercontent.com/Mathews-Tom/deepwhisperer/refs/heads/main/assets/BotFather.jpeg)
 
-3. Then you will receive a message from BotFather
+3. Select the New Bot option - In the conversation with BotFather, select the "New Bot", `/newbot` option to start creating your new bot. BotFather will guide you through the rest of the process.
 
-4. Send `/newbot` and then follow the instructions given by BotFather.
+4. Add a bot name - Next, BotFather will ask you to provide a name for your bot. Choose a name that accurately reflects the purpose of your bot and is easy to remember.
 
-5. Send `/token` to get HTTP API access token.
+5. Choose a username for your bot - Lastly, BotFather will ask you to choose a username for your bot. This username will be used to create a unique URL that people can use to access your bot. Choose a username that is easy to remember and related to your bot's purpose.
 
-    ![Create new bot](assets/2.webp)
+6. Get your Bots HTTP Token - If you send the command `/token` in BotFather and select the bot, you will get the HTTP Token needed to continue with the automation.
+
+    ![Create new bot](https://raw.githubusercontent.com/Mathews-Tom/deepwhisperer/refs/heads/main/assets/CreateNewBot.jpeg)
 
 ## Installation
 
@@ -63,11 +71,11 @@ notifier.send_message("Hello, Telegram!")
 ### **2️⃣ Using the Decorator for Function Execution Notifications**
 
 ```python
-from deepwhisperer import DeepWhisperer, deepwhisper_sentinel
+from deepwhisperer import DeepWhisperer, deepwhisperer_sentinel
 
 notifier = DeepWhisperer(access_token="your_telegram_bot_token")
 
-@deepwhisper_sentinel(notifier, default_description="Data Processing Task")
+@deepwhisperer_sentinel(notifier, default_description="Data Processing Task")
 def process_data():
     import time
     time.sleep(3)  # Simulating a task
@@ -108,7 +116,7 @@ notifier.send_video("path/to/video.mp4", caption="Watch this!")
 | `deduplication_ttl` | `int` | `300`    | Time-to-live for duplicate message tracking |
 | `batch_interval`  | `int`   | `15`     | Time window for batching text messages |
 
-### **Decorator Parameters (`deepwhisper_sentinel`)**
+### **Decorator Parameters (`deepwhisperer_sentinel`)**
 
 | Parameter             | Type           | Default  | Description |
 |----------------------|---------------|----------|-------------|
