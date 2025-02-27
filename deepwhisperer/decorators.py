@@ -6,7 +6,7 @@ from typing import Callable
 from .deepwhisperer import DeepWhisperer
 
 
-def deepwhisper_sentinel(
+def deepwhisperer_sentinel(
     notifier: DeepWhisperer, default_description: str = "Task"
 ) -> Callable:
     """
