@@ -1,5 +1,3 @@
-# deepwhisperer.py
-
 import hashlib
 import io
 import logging
@@ -10,7 +8,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from cachetools import TTLCache
@@ -63,38 +61,7 @@ class DeepWhisperer:
         failed_messages (list): List of messages that failed after retry attempts.
         stop_event (threading.Event): Event to signal the processing thread to stop.
         executor (ThreadPoolExecutor): Thread pool executor for background processing.
-        http_client (httpx.Client): HTTP client for making Telegram API requests.
-
-    Methods:
-        send_contact: Sends a phone contact with optional vCard data.
-
-        send_dice: Sends an animated emoji that displays a random value.
-
-        send_animation: Sends an animation file (GIF or H.264/MPEG-4 AVC video without sound) to the chat.
-
-        send_audio: Sends an audio file to the chat with optional metadata (duration, performer, title) and notification settings.
-
-        send_file: Sends a file (document, image, video, etc.) to the chat with optional caption and notification settings.
-
-        send_location: Sends a location point on the map with optional accuracy and live period settings.
-
-        send_media_group: Sends a group of photos, videos, documents, or audios as an album.
-
-        send_message: Sends a text message asynchronously with optional formatting and duplicate prevention.
-
-        send_photo: Sends a photo to the chat with optional caption, spoiler, and notification settings.
-
-        send_poll: Sends a native poll with customizable options, anonymity, and timing settings.
-
-        send_video: Sends a video file to the chat with optional metadata (duration, width, height) and notification settings.
-
-        send_video_note: Sends a video note (rounded square MPEG4 video) to the chat.
-
-        send_voice: Sends a voice message to the chat with optional caption and notification settings.
-
-        send_venue: Sends information about a venue with optional Foursquare and Google Places identifiers.
-
-        stop: Gracefully shuts down the notifier, ensuring all messages are sent before stopping.
+        httpx_client (httpx.Client): HTTP client for making Telegram API requests.
     """
 
     def __init__(
@@ -121,6 +88,7 @@ class DeepWhisperer:
             batch_interval (int): Time window (seconds) to batch text messages before sending.
         """
         self.access_token = access_token
+        self.httpx_client = httpx.Client(timeout=10)
         self.chat_id = chat_id if chat_id else self._get_chat_id()
 
         if not self.chat_id:
@@ -134,11 +102,13 @@ class DeepWhisperer:
         self.recent_messages = TTLCache(maxsize=100, ttl=deduplication_ttl)
 
         # Initialize queues and threading components
-        self.message_queue = queue.Queue(maxsize=queue_size)
-        self.failed_messages = []
+        self.message_queue: queue.Queue[
+            Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]
+        ] = queue.Queue(maxsize=queue_size)
+        self.failed_messages: List[Tuple[str, Dict[str, Any]]] = []
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=3)
-        self.http_client = httpx.Client(timeout=10)
+        self.httpx_client = httpx.Client(timeout=10)
 
         # Start background processing thread
         self.executor.submit(self._process_queue)
@@ -150,40 +120,36 @@ class DeepWhisperer:
         self.send_message(self._get_connection_established_message())
 
     def _get_chat_id(self) -> Optional[str]:
-        """Fetches the chat_id dynamically using the bot's getUpdates method."""
+        """
+        Fetches the chat_id dynamically using the bot's getUpdates method.
+
+        Returns:
+            Optional[str]: The chat ID if found, otherwise None.
+        """
         try:
             url = f"https://api.telegram.org/bot{self.access_token}/getUpdates"
-            response = httpx.get(url, timeout=10)
+            response = self.httpx_client.get(url, timeout=10)
             response.raise_for_status()
             data = response.json()
 
-            if "result" in data and len(data["result"]) > 0:
+            if "result" in data and data["result"]:
                 return data["result"][0]["message"]["chat"]["id"]
             else:
                 LOGGER.error(
                     "Failed to fetch chat_id: No messages found in getUpdates."
                 )
                 return None
+        except httpx.HTTPError as e:
+            LOGGER.error(f"HTTP error retrieving chat_id: {e}")
+            return None
         except Exception as e:
-            LOGGER.error(f"Error retrieving chat_id: {e}")
+            LOGGER.error(f"Unexpected error retrieving chat_id: {e}")
             return None
 
     @classmethod
     def _get_connection_established_message(cls):
-        """Returns a randomly selected connection message with a timestamp-based seed."""
-
-        # Save the current random state
-        state = random.getstate()
-
-        # Use a timestamp-based seed for local randomness
-        temp_seed = int(time.time() * 1000)  # Millisecond precision
-        temp_random = random.Random(temp_seed)
-        connection_msg = temp_random.choice(CONNECTION_MESSAGES)
-
-        # Restore the previous random state
-        random.setstate(state)
-
-        return connection_msg
+        """Returns a randomly selected connection message."""
+        return random.choice(CONNECTION_MESSAGES)
 
     @classmethod
     def _get_formatted_time(cls) -> str:
@@ -201,27 +167,32 @@ class DeepWhisperer:
         interval and retrying failed messages.
         """
         while not self.stop_event.is_set():
-            batch = []
-            collected_messages = []
+            batch: List[Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]] = []
+            collected_messages: List[str] = []
             start_time = time.time()
 
             try:
                 while time.time() - start_time < self.batch_interval:
                     try:
-                        item = self.message_queue.get(
-                            timeout=0.5
-                        )  # Wait for messages with a short timeout
-                        if item is None:  # Exit signal
+                        item: Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]] = (
+                            self.message_queue.get(timeout=0.5)
+                        )
+                        if item is None or item[0] == "STOP":
                             return
 
-                        if item[0] == "sendMessage":
-                            collected_messages.append(item[1]["text"])
+                        endpoint, payload, files = item
+
+                        if endpoint == "sendMessage":
+                            collected_messages.append(payload["text"])
                         else:
                             batch.append(item)
-                    except queue.Empty:
-                        continue  # No new messages, continue waiting until batch interval expires
 
-                # If multiple text messages are collected, send them as a single batch
+                        # Mark task as done
+                        self.message_queue.task_done()
+
+                    except queue.Empty:
+                        continue
+
                 if collected_messages:
                     combined_message = "\n\n".join(collected_messages)
                     batch.append(
@@ -232,7 +203,6 @@ class DeepWhisperer:
                         )
                     )
 
-                # Process batch requests
                 if batch:
                     with ThreadPoolExecutor(max_workers=len(batch)) as executor:
                         future_to_task = {
@@ -245,24 +215,13 @@ class DeepWhisperer:
                             task = future_to_task[future]
                             try:
                                 response = future.result()
-                                if response:
-                                    LOGGER.info("Request sent successfully: %s", task)
-                                else:
-                                    LOGGER.warning(
-                                        "Failed request, adding to retry queue: %s",
-                                        task,
-                                    )
+                                if not response:
                                     self.failed_messages.append(task)
                             except Exception as e:
                                 LOGGER.error("Error processing request: %s", e)
                                 self.failed_messages.append(task)
-                            finally:
-                                self.message_queue.task_done()
 
-                # Retry failed messages
                 self._retry_failed_messages()
-
-                # Ensure batching logic respects time window
                 time.sleep(0.5)
 
             except Exception:
@@ -274,20 +233,58 @@ class DeepWhisperer:
             return
 
         LOGGER.info("Retrying failed messages...")
-        remaining_failed = []
+        remaining_failed: List[
+            Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]
+        ] = []
 
-        for endpoint, payload in self.failed_messages:
+        for endpoint, payload, files in self.failed_messages:
             try:
-                response = self._send_request(endpoint, payload)
-                if response:
-                    LOGGER.info("Successfully resent failed message.")
-                else:
-                    remaining_failed.append((endpoint, payload))
+                response = self._send_request(endpoint, payload, files)
+                if not response:
+                    remaining_failed.append((endpoint, payload, files))
             except Exception as e:
                 LOGGER.error(f"Retry failed: {e}")
-                remaining_failed.append((endpoint, payload))
+                remaining_failed.append((endpoint, payload, files))
 
-        self.failed_messages = remaining_failed  # Retain messages that still failed
+        self.failed_messages = remaining_failed
+
+    def _send_request(
+        self,
+        endpoint: str,
+        payload: Optional[Dict[str, Any]] = None,
+        files: Optional[Dict[str, Any]] = None,
+    ) -> Optional[httpx.Response]:
+        """Handles API requests with retries and exponential backoff."""
+
+        url = f"https://api.telegram.org/bot{self.access_token}/{endpoint}"
+
+        for attempt in range(self.max_retries):
+            try:
+                if files:
+                    # Reset the file buffer to the beginning before each retry
+                    for key, (_, file_obj, _) in files.items():
+                        file_obj.seek(0)
+
+                    response = self.httpx_client.post(url, data=payload, files=files)
+                else:
+                    response = self.httpx_client.post(url, data=payload)  # Fixed here
+
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as e:
+                LOGGER.warning(f"Retry {attempt + 1}/{self.max_retries}: {e}")
+                if attempt < self.max_retries - 1:
+                    jitter = random.uniform(0.5, 1.5)
+                    sleep_time = self.retry_delay * (2**attempt) * jitter
+                    time.sleep(sleep_time)
+                else:
+                    LOGGER.error(
+                        f"Max retries reached. Skipping request.\nError: {traceback.format_exc()}"
+                    )
+                    return None
+            except Exception as e:
+                LOGGER.error(f"Unexpected Error: {e}\n{traceback.format_exc()}")
+                return None
 
     def _send_media(
         self,
@@ -304,7 +301,7 @@ class DeepWhisperer:
             LOGGER.warning(f"File doesn't exist: {file_path}")
             return
 
-        caption = caption if caption else ""
+        caption = caption or ""
         wrapped_caption = (
             f"{self._get_formatted_title()}\n{caption}\n{self._get_formatted_time()}"
         )
@@ -333,65 +330,36 @@ class DeepWhisperer:
 
             LOGGER.debug(f"Sending {media_type} {file_path} with payload {payload}")
 
-            response = self._send_request(endpoint, payload, files)
-
-            if response:
-                LOGGER.info(f"{media_type.capitalize()} sent successfully: {file_path}")
-                LOGGER.debug(f"Response: {response}")
-            else:
-                LOGGER.warning(f"Failed to send {media_type}: {file_path}")
-                LOGGER.debug(f"API Response: {response}")
+            # Queue the media message
+            self.message_queue.put_nowait((endpoint, payload, files))
+            LOGGER.info(f"{media_type.capitalize()} queued successfully: {file_path}")
 
         except FileNotFoundError:
             LOGGER.error(f"File not found: {file_path}")
         except Exception as e:
             LOGGER.error(f"Error sending {media_type}: {e}\n{traceback.format_exc()}")
 
-    def _send_request(
-        self,
-        endpoint: str,
-        payload: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
-    ) -> Optional[httpx.Response]:
-        """Handles API requests with retries and exponential backoff."""
-
-        url = f"https://api.telegram.org/bot{self.access_token}/{endpoint}"
-
-        for attempt in range(self.max_retries):
-            try:
-                if files:
-                    # Reset the file buffer to the beginning before each retry
-                    for key, (_, file_obj, _) in files.items():
-                        file_obj.seek(0)
-
-                    response = self.http_client.post(url, data=payload, files=files)
-                else:
-                    response = self.http_client.post(url, json=payload)
-
-                response.raise_for_status()
-                return response
-            except httpx.HTTPError as e:
-                LOGGER.warning(f"Retry {attempt + 1}/{self.max_retries}: {e}")
-                if attempt < self.max_retries - 1:
-                    jitter = random.uniform(0.5, 1.5)
-                    sleep_time = self.retry_delay * (2**attempt) * jitter
-                    time.sleep(sleep_time)
-                else:
-                    LOGGER.error(
-                        f"Max retries reached. Skipping request.\nError: {traceback.format_exc()}"
-                    )
-                    return None
-
     def send_message(
         self, message: str, parse_mode: str = "Markdown", allow_duplicates: bool = False
     ) -> None:
-        """Queues a message for asynchronous sending with a formatted timestamp."""
+        """
+        Queues a text message for sending.
+
+        Args:
+            message (str): The text content of the message.
+            parse_mode (str, optional): The parse mode for the message (e.g., 'Markdown', 'HTML'). Defaults to 'Markdown'.
+            allow_duplicates (bool, optional): If True, allows sending duplicate messages. Defaults to False.
+        """
+        if not message.strip():
+            LOGGER.warning("Attempted to send an empty message. Skipping.")
+            return
+
         # Wrap message with title and timestamp
         wrapped_message = (
             f"{self._get_formatted_title()}\n{message}\n{self._get_formatted_time()}"
         )
 
-        # Generate a hash for the message
+        # Generate a hash for the message to prevent duplicates
         message_hash = hashlib.sha256(wrapped_message.encode()).hexdigest()
 
         # Check for duplicate messages within TTL
@@ -399,7 +367,7 @@ class DeepWhisperer:
             LOGGER.info(f"Skipping duplicate message: {wrapped_message}")
             return
 
-        # Store only the hash in TTLCache (value can be `True` or a timestamp)
+        # Store only the hash in TTLCache to prevent duplicates
         self.recent_messages[message_hash] = True
 
         payload = {
@@ -407,14 +375,17 @@ class DeepWhisperer:
             "parse_mode": parse_mode,
             "text": wrapped_message,
         }
+
         try:
-            # Queue the message for processing
+            # Attempt to queue the message
             self.message_queue.put_nowait(("sendMessage", payload, None))
-            LOGGER.info(f"Message queued: {message}")
+            LOGGER.info(f"Message queued successfully: {message}")
+
         except queue.Full:
             LOGGER.warning(f"Message queue full. Dropping message: {message}")
-        except Exception:
-            LOGGER.error(f"Error queuing message:\n{traceback.format_exc()}")
+
+        except Exception as e:
+            LOGGER.error(f"Error queuing message: {e}\n{traceback.format_exc()}")
 
     def send_file(
         self,
@@ -423,7 +394,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a document via Telegram bot."""
+        """
+        Sends a file (document) via Telegram.
+
+        Args:
+            file_path (Path): The path to the file to send.
+            caption (str, optional): The caption for the file. Defaults to None.
+            disable_notification (bool, optional): If True, sends the file silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendDocument",
@@ -440,7 +419,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a photo via Telegram bot."""
+        """
+        Sends a photo via Telegram.
+
+        Args:
+            file_path (Path): The path to the photo file.
+            caption (str, optional): The caption for the photo. Defaults to None.
+            disable_notification (bool, optional): If True, sends the photo silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendPhoto",
@@ -457,7 +444,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends an audio file via Telegram bot."""
+        """
+        Sends an audio file via Telegram.
+
+        Args:
+            file_path (Path): The path to the audio file.
+            caption (str, optional): The caption for the audio file. Defaults to None.
+            disable_notification (bool, optional): If True, sends the audio silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendAudio",
@@ -474,7 +469,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a video file via Telegram bot."""
+        """
+        Sends a video file via Telegram.
+
+        Args:
+            file_path (Path): The path to the video file.
+            caption (str, optional): The caption for the video file. Defaults to None.
+            disable_notification (bool, optional): If True, sends the video silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendVideo",
@@ -491,7 +494,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends an animation file via Telegram bot."""
+        """
+        Sends an animation (GIF) file via Telegram.
+
+        Args:
+            file_path (Path): The path to the animation file.
+            caption (str, optional): The caption for the animation. Defaults to None.
+            disable_notification (bool, optional): If True, sends the animation silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendAnimation",
@@ -508,7 +519,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a voice message via Telegram bot."""
+        """
+        Sends a voice message via Telegram.
+
+        Args:
+            file_path (Path): The path to the voice message file.
+            caption (str, optional): The caption for the voice message. Defaults to None.
+            disable_notification (bool, optional): If True, sends the voice message silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendVoice",
@@ -524,12 +543,19 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a video note via Telegram bot."""
+        """
+        Sends a video note via Telegram.
+
+        Args:
+            file_path (Path): The path to the video note file.
+            disable_notification (bool, optional): If True, sends the video note silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         self._send_media(
             file_path,
             "sendVideoNote",
             "video_note",
-            None,
+            None,  # Video notes do not support captions
             disable_notification,
             reply_to_message_id,
         )
@@ -540,7 +566,18 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a group of media files as an album via Telegram bot."""
+        """
+        Sends a group of media files as an album via Telegram.
+
+        Args:
+            media (List[Dict[str, Any]]): A list of dictionaries, each representing a media file.
+                                            Each dictionary must have:
+                                            - 'type' (str): The type of the media ('photo', 'video').
+                                            - 'media' (str): The media file id.
+                                            - optionally 'caption' (str) : Add a caption to the media.
+            disable_notification (bool, optional): If True, sends the media group silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         payload = {
             "chat_id": self.chat_id,
             "media": media,
@@ -565,7 +602,15 @@ class DeepWhisperer:
         disable_notification: bool = False,
         reply_to_message_id: Optional[int] = None,
     ) -> None:
-        """Sends a location via Telegram bot."""
+        """
+        Sends a location via Telegram.
+
+        Args:
+            latitude (float): The latitude of the location.
+            longitude (float): The longitude of the location.
+            disable_notification (bool, optional): If True, sends the location silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
         payload = {
             "chat_id": self.chat_id,
             "latitude": latitude,
@@ -578,149 +623,38 @@ class DeepWhisperer:
 
         try:
             self.message_queue.put_nowait(("sendLocation", payload, None))
-            LOGGER.info("Location queued.")
+            LOGGER.info(f"Location queued: lat={latitude}, long={longitude}")
         except queue.Full:
-            LOGGER.warning("Message queue full. Dropping location.")
+            LOGGER.warning(
+                f"Message queue full. Dropping location: lat={latitude}, long={longitude}"
+            )
         except Exception:
             LOGGER.error(f"Error queuing location:\n{traceback.format_exc()}")
 
-    def send_venue(
-        self,
-        latitude: float,
-        longitude: float,
-        title: str,
-        address: str,
-        disable_notification: bool = False,
-        reply_to_message_id: Optional[int] = None,
-    ) -> None:
-        """Sends a venue via Telegram bot."""
-        payload = {
-            "chat_id": self.chat_id,
-            "latitude": latitude,
-            "longitude": longitude,
-            "title": title,
-            "address": address,
-            "disable_notification": disable_notification,
-        }
-
-        if reply_to_message_id:
-            payload["reply_to_message_id"] = reply_to_message_id
-
-        try:
-            self.message_queue.put_nowait(("sendVenue", payload, None))
-            LOGGER.info("Venue queued.")
-        except queue.Full:
-            LOGGER.warning("Message queue full. Dropping venue.")
-        except Exception:
-            LOGGER.error(f"Error queuing venue:\n{traceback.format_exc()}")
-
-    def send_contact(
-        self,
-        phone_number: str,
-        first_name: str,
-        last_name: Optional[str] = None,
-        disable_notification: bool = False,
-        reply_to_message_id: Optional[int] = None,
-    ) -> None:
-        """Sends a contact via Telegram bot."""
-        payload = {
-            "chat_id": self.chat_id,
-            "phone_number": phone_number,
-            "first_name": first_name,
-            "disable_notification": disable_notification,
-        }
-
-        if last_name:
-            payload["last_name"] = last_name
-
-        if reply_to_message_id:
-            payload["reply_to_message_id"] = reply_to_message_id
-
-        try:
-            self.message_queue.put_nowait(("sendContact", payload, None))
-            LOGGER.info("Contact queued.")
-        except queue.Full:
-            LOGGER.warning("Message queue full. Dropping contact.")
-        except Exception:
-            LOGGER.error(f"Error queuing contact:\n{traceback.format_exc()}")
-
-    def send_poll(
-        self,
-        question: str,
-        options: List[str],
-        is_anonymous: bool = True,
-        type: str = "regular",
-        allows_multiple_answers: bool = False,
-        correct_option_id: Optional[int] = None,
-        explanation: Optional[str] = None,
-        disable_notification: bool = False,
-        reply_to_message_id: Optional[int] = None,
-    ) -> None:
-        """Sends a poll via Telegram bot."""
-        payload = {
-            "chat_id": self.chat_id,
-            "question": question,
-            "options": options,
-            "is_anonymous": is_anonymous,
-            "type": type,
-            "allows_multiple_answers": allows_multiple_answers,
-            "disable_notification": disable_notification,
-        }
-
-        if correct_option_id is not None:
-            payload["correct_option_id"] = correct_option_id
-
-        if explanation:
-            payload["explanation"] = explanation
-
-        if reply_to_message_id:
-            payload["reply_to_message_id"] = reply_to_message_id
-
-        try:
-            self.message_queue.put_nowait(("sendPoll", payload, None))
-            LOGGER.info("Poll queued.")
-        except queue.Full:
-            LOGGER.warning("Message queue full. Dropping poll.")
-        except Exception:
-            LOGGER.error(f"Error queuing poll:\n{traceback.format_exc()}")
-
-    def send_dice(
-        self,
-        emoji: Optional[str] = None,
-        disable_notification: bool = False,
-        reply_to_message_id: Optional[int] = None,
-    ) -> None:
-        """Sends a dice via Telegram bot."""
-        payload = {
-            "chat_id": self.chat_id,
-            "disable_notification": disable_notification,
-        }
-
-        if emoji:
-            payload["emoji"] = emoji
-
-        if reply_to_message_id:
-            payload["reply_to_message_id"] = reply_to_message_id
-
-        try:
-            self.message_queue.put_nowait(("sendDice", payload, None))
-            LOGGER.info("Dice queued.")
-        except queue.Full:
-            LOGGER.warning("Message queue full. Dropping dice.")
-        except Exception:
-            LOGGER.error(f"Error queuing dice:\n{traceback.format_exc()}")
-
     def stop(self) -> None:
-        """Gracefully shuts down the notifier, ensuring all messages are sent."""
+        """Gracefully shuts down the notifier, ensuring all messages are processed before exiting."""
         LOGGER.info("Shutting down DeepWhisperer...")
 
-        # Wait for queue to empty before stopping
-        while not self.message_queue.empty():
-            time.sleep(1)
-
+        # Signal the processing thread to stop
         self.stop_event.set()
-        self.message_queue.put(None)  # Signal shutdown
-        self.executor.shutdown(wait=True)
 
-        self.http_client.close()  # Close HTTP session
-        LOGGER.info("DeepWhisperer shutdown complete.")
+        try:
+            # Drain the message queue to process remaining messages
+            while not self.message_queue.empty():
+                time.sleep(0.5)
+
+            # Stop the executor gracefully
+            self.executor.shutdown(wait=True)
+            LOGGER.info("Executor shut down successfully.")
+
+        except Exception as e:
+            LOGGER.error(f"Error during shutdown: {e}\n{traceback.format_exc()}")
+
+        finally:
+            # Close the HTTP client session
+            self.httpx_client.close()
+            LOGGER.info("DeepWhisperer stopped.")
+
+
+if __name__ == "__main__":
+    pass
