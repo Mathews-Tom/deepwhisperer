@@ -18,7 +18,7 @@
 
 - **📷 Rich Media Support**: Supports sending images and documents alongside text messages, enabling seamless sharing of visual results or files.
 
-- **✅ Function Execution Notification Decorator** (`deepwhisperer_sentinel`): Simplifies integrating Telegram notifications into your existing functions. The `deepwhisperer_sentinel` decorator automatically sends notifications when a function starts, completes successfully, or encounters an error. ing tasks.
+- **✅ Function Execution Notification Decorator** (`sentinel`): Simplifies integrating Telegram notifications into your existing functions. The `sentinel` decorator automatically sends notifications when a function starts, completes successfully, or encounters an error. ing tasks.
 
 ---
 
@@ -71,11 +71,11 @@ notifier.send_message("Hello, Telegram!")
 ### **2️⃣ Using the Decorator for Function Execution Notifications**
 
 ```python
-from deepwhisperer import DeepWhisperer, deepwhisperer_sentinel
+from deepwhisperer import DeepWhisperer, sentinel
 
 notifier = DeepWhisperer(access_token="your_telegram_bot_token")
 
-@deepwhisperer_sentinel(notifier, default_description="Data Processing Task")
+@sentinel(notifier, default_description="Data Processing Task")
 def process_data():
     import time
     time.sleep(3)  # Simulating a task
@@ -116,7 +116,7 @@ notifier.send_video("path/to/video.mp4", caption="Watch this!")
 | `deduplication_ttl` | `int` | `300`    | Time-to-live for duplicate message tracking |
 | `batch_interval`  | `int`   | `15`     | Time window for batching text messages |
 
-### **Decorator Parameters (`deepwhisperer_sentinel`)**
+### **Decorator Parameters (`sentinel`)**
 
 | Parameter             | Type           | Default  | Description |
 |----------------------|---------------|----------|-------------|

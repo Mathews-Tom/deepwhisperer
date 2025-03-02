@@ -1,14 +1,16 @@
+from __future__ import annotations
+
 import time
 import traceback
 from functools import wraps
-from typing import Callable
+from typing import Any, Callable
 
 from .deepwhisperer import DeepWhisperer
 
 
-def deepwhisperer_sentinel(
+def sentinel(
     notifier: DeepWhisperer, default_description: str = "Task"
-) -> Callable:
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     A decorator to send Telegram notifications before and after a function execution using the DeepWhisperer class.
 
@@ -17,53 +19,44 @@ def deepwhisperer_sentinel(
         default_description (str, optional): Default description for the function being executed.
 
     Returns:
-        function: Wrapped function with Telegram notifications.
+        Callable[[Callable[..., Any]], Callable[..., Any]]: Wrapped function with Telegram notifications.
     """
 
-    def decorator(func):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
-        def wrapper(*args, **kwargs):
-            description = kwargs.pop(
-                "description", default_description
-            )  # Allow dynamic override
-            do_notify = kwargs.pop("do_notify", True)  # Allow dynamic override
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            description = kwargs.pop("description", default_description)
+            do_notify = kwargs.pop("do_notify", True)
 
             if do_notify:
-                # Notify function start
                 start_time = time.time()
                 notifier.send_message(f"🚀 {description} started: `{func.__name__}`")
 
             try:
-                result = func(*args, **kwargs)  # Execute the original function
+                result = func(*args, **kwargs)
 
                 if do_notify:
-                    # Compute execution time
                     elapsed_time = int(time.time() - start_time)
                     hours, remainder = divmod(elapsed_time, 3600)
                     minutes, seconds = divmod(remainder, 60)
 
-                    # Notify success
                     success_message = (
                         f"✅ {description} completed: `{func.__name__}`\n"
                         f"⏱ Time Taken: {hours}h {minutes}m {seconds}s"
                     )
                     notifier.send_message(success_message)
-
                 return result
 
             except Exception as e:
                 if do_notify:
-                    # Capture full error traceback
                     error_details = traceback.format_exc()
                     error_message = (
                         f"❌ {description} failed: `{func.__name__}`\n"
                         f"⚠️ Error: {str(e)}\n"
                         f"🔍 Traceback:\n```{error_details}```"
                     )
-                    notifier.send_message(
-                        error_message
-                    )  # Send error details to Telegram
-                raise  # Re-raise the exception
+                    notifier.send_message(error_message)
+                raise
 
         return wrapper
 

@@ -90,7 +90,7 @@ def test_retry_failed_messages(deepwhisperer):
     deepwhisperer.failed_messages = [("sendMessage", {"text": "Failed message"}, None)]
     with patch.object(deepwhisperer, "_send_request", return_value=None):
         deepwhisperer._retry_failed_messages()
-        assert len(deepwhisperer.failed_messages) >= 0
+        assert len(deepwhisperer.failed_messages) == 1
 
 
 # Test duplicate message filtering
@@ -100,7 +100,7 @@ def test_duplicate_message_filtering(deepwhisperer):
         deepwhisperer.send_message("Test message")
         deepwhisperer.send_message("Test message")  # This should be filtered
         # Account for the initialization message
-        assert deepwhisperer.message_queue.qsize() >= 0
+        assert deepwhisperer.message_queue.qsize() == 2
 
 
 # Test queue overflow handling
@@ -121,7 +121,7 @@ def test_send_video_note(deepwhisperer):
     with patch("builtins.open", mock_open(read_data=b"test")) as mock_file:
         deepwhisperer.send_video_note(mock_file_path)
         # Account for the initialization message
-        assert deepwhisperer.message_queue.qsize() >= 0
+        assert deepwhisperer.message_queue.qsize() >= 1
 
 
 # Test sending an animation
@@ -130,7 +130,7 @@ def test_send_animation(deepwhisperer):
     with patch("builtins.open", mock_open(read_data=b"test")) as mock_file:
         deepwhisperer.send_animation(mock_file_path)
         # Account for the initialization message
-        assert deepwhisperer.message_queue.qsize() >= 0
+        assert deepwhisperer.message_queue.qsize() >= 1
 
 
 # Test sending a voice message
@@ -139,4 +139,4 @@ def test_send_voice(deepwhisperer):
     with patch("builtins.open", mock_open(read_data=b"test")) as mock_file:
         deepwhisperer.send_voice(mock_file_path)
         # Account for the initialization message
-        assert deepwhisperer.message_queue.qsize() >= 0
+        assert deepwhisperer.message_queue.qsize() >= 1

@@ -11,8 +11,7 @@ from deepwhisperer import DeepWhisperer
 logging.basicConfig(level=logging.INFO)
 
 load_dotenv()
-# Replace with your actual Telegram bot token and chat ID (o
-# r let it be detected automatically)
+# Replace with your actual Telegram bot token and chat ID (or let it be detected automatically)
 BOT_TOKEN = os.getenv("DEEP_WHISPERER_API_KEY")
 CHAT_ID = (
     None  # Optional: If you don't set it, it will try to retrieve it automatically.
@@ -68,7 +67,9 @@ def main():
         # Send a document
         whisperer.send_file(file_path=FILE_PATH_VIDEO, caption="Test Document")
 
+        # Send a video
         whisperer.send_video(file_path=FILE_PATH_VIDEO, caption="Test Video")
+
         # Send a location
         whisperer.send_location(latitude=40.7128, longitude=-74.0060)
 

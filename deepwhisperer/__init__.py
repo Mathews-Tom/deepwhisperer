@@ -1,4 +1,4 @@
-from .decorators import deepwhisperer_sentinel
+from .decorators import sentinel
 from .deepwhisperer import DeepWhisperer
 
-__all__ = ["DeepWhisperer", "deepwhisperer_sentinel"]
+__all__ = ["DeepWhisperer", "sentinel"]

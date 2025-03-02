@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import io
 import logging
@@ -8,7 +10,7 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Self, Tuple
 
 import httpx
 from cachetools import TTLCache
@@ -108,7 +110,6 @@ class DeepWhisperer:
         self.failed_messages: List[Tuple[str, Dict[str, Any]]] = []
         self.stop_event = threading.Event()
         self.executor = ThreadPoolExecutor(max_workers=3)
-        self.httpx_client = httpx.Client(timeout=10)
 
         # Start background processing thread
         self.executor.submit(self._process_queue)
@@ -147,7 +148,7 @@ class DeepWhisperer:
             return None
 
     @classmethod
-    def _get_connection_established_message(cls):
+    def _get_connection_established_message(cls) -> str:
         """Returns a randomly selected connection message."""
         return random.choice(CONNECTION_MESSAGES)
 
@@ -167,14 +168,14 @@ class DeepWhisperer:
         interval and retrying failed messages.
         """
         while not self.stop_event.is_set():
-            batch: List[Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]] = []
-            collected_messages: List[str] = []
+            batch: list[tuple[str, dict[str, Any], Optional[dict[str, Any]]]] = []
+            collected_messages: list[str] = []
             start_time = time.time()
 
             try:
                 while time.time() - start_time < self.batch_interval:
                     try:
-                        item: Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]] = (
+                        item: tuple[str, dict[str, Any], Optional[dict[str, Any]]] = (
                             self.message_queue.get(timeout=0.5)
                         )
                         if item is None or item[0] == "STOP":
@@ -233,8 +234,8 @@ class DeepWhisperer:
             return
 
         LOGGER.info("Retrying failed messages...")
-        remaining_failed: List[
-            Tuple[str, Dict[str, Any], Optional[Dict[str, Any]]]
+        remaining_failed: list[
+            tuple[str, dict[str, Any], Optional[dict[str, Any]]]
         ] = []
 
         for endpoint, payload, files in self.failed_messages:
@@ -251,8 +252,8 @@ class DeepWhisperer:
     def _send_request(
         self,
         endpoint: str,
-        payload: Optional[Dict[str, Any]] = None,
-        files: Optional[Dict[str, Any]] = None,
+        payload: Optional[dict[str, Any]] = None,
+        files: Optional[dict[str, Any]] = None,
     ) -> Optional[httpx.Response]:
         """Handles API requests with retries and exponential backoff."""
 
@@ -267,7 +268,7 @@ class DeepWhisperer:
 
                     response = self.httpx_client.post(url, data=payload, files=files)
                 else:
-                    response = self.httpx_client.post(url, data=payload)  # Fixed here
+                    response = self.httpx_client.post(url, data=payload)
 
                 response.raise_for_status()
                 return response
@@ -630,6 +631,266 @@ class DeepWhisperer:
             )
         except Exception:
             LOGGER.error(f"Error queuing location:\n{traceback.format_exc()}")
+
+    def send_contact(
+        self,
+        phone_number: str,
+        first_name: str,
+        last_name: Optional[str] = None,
+        vcard: Optional[str] = None,
+        disable_notification: bool = False,
+        reply_to_message_id: Optional[int] = None,
+    ) -> None:
+        """
+        Sends a contact via Telegram.
+
+        Args:
+            phone_number (str): The phone number of the contact.
+            first_name (str): The first name of the contact.
+            last_name (str, optional): The last name of the contact. Defaults to None.
+            vcard (str, optional): Additional vCard data about the contact. Defaults to None.
+            disable_notification (bool, optional): If True, sends the contact silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
+        payload = {
+            "chat_id": self.chat_id,
+            "phone_number": phone_number,
+            "first_name": first_name,
+            "disable_notification": disable_notification,
+        }
+
+        if last_name:
+            payload["last_name"] = last_name
+        if vcard:
+            payload["vcard"] = vcard
+        if reply_to_message_id:
+            payload["reply_to_message_id"] = reply_to_message_id
+
+        try:
+            self.message_queue.put_nowait(("sendContact", payload, None))
+            LOGGER.info(f"Contact queued: {first_name} {last_name or ''}")
+        except queue.Full:
+            LOGGER.warning(
+                f"Message queue full. Dropping contact: {first_name} {last_name or ''}"
+            )
+        except Exception:
+            LOGGER.error(f"Error queuing contact:\n{traceback.format_exc()}")
+
+    def send_poll(
+        self,
+        question: str,
+        options: List[str],
+        is_anonymous: bool = True,
+        type: str = "regular",
+        allows_multiple_answers: bool = False,
+        correct_option_id: Optional[int] = None,
+        explanation: Optional[str] = None,
+        explanation_parse_mode: Optional[str] = None,
+        open_period: Optional[int] = None,
+        close_date: Optional[int] = None,
+        is_closed: bool = False,
+        disable_notification: bool = False,
+        reply_to_message_id: Optional[int] = None,
+    ) -> None:
+        """
+        Sends a poll via Telegram.
+
+        Args:
+            question (str): The poll question.
+            options (List[str]): A list of answer options (2-10 strings).
+            is_anonymous (bool, optional): If True, the poll is anonymous. Defaults to True.
+            type (str, optional): The type of poll ('regular' or 'quiz'). Defaults to 'regular'.
+            allows_multiple_answers (bool, optional): If True, allows multiple answers. Defaults to False.
+            correct_option_id (int, optional): The 0-based identifier of the correct answer option (for quiz type). Defaults to None.
+            explanation (str, optional): Text explaining the correct answer (for quiz type). Defaults to None.
+            explanation_parse_mode (str, optional): Mode for parsing the explanation ('Markdown', 'HTML'). Defaults to None.
+            open_period (int, optional): Amount of time in seconds the poll will be active after creation. Defaults to None.
+            close_date (int, optional): Point in time (Unix timestamp) when the poll will be automatically closed. Defaults to None.
+            is_closed (bool, optional): If True, the poll is immediately closed. Defaults to False.
+            disable_notification (bool, optional): If True, sends the poll silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
+        payload = {
+            "chat_id": self.chat_id,
+            "question": question,
+            "options": options,
+            "is_anonymous": is_anonymous,
+            "type": type,
+            "allows_multiple_answers": allows_multiple_answers,
+            "is_closed": is_closed,
+            "disable_notification": disable_notification,
+        }
+
+        if correct_option_id is not None:
+            payload["correct_option_id"] = correct_option_id
+        if explanation:
+            payload["explanation"] = explanation
+        if explanation_parse_mode:
+            payload["explanation_parse_mode"] = explanation_parse_mode
+        if open_period:
+            payload["open_period"] = open_period
+        if close_date:
+            payload["close_date"] = close_date
+        if reply_to_message_id:
+            payload["reply_to_message_id"] = reply_to_message_id
+
+        try:
+            self.message_queue.put_nowait(("sendPoll", payload, None))
+            LOGGER.info(f"Poll queued: {question}")
+        except queue.Full:
+            LOGGER.warning(f"Message queue full. Dropping poll: {question}")
+        except Exception:
+            LOGGER.error(f"Error queuing poll:\n{traceback.format_exc()}")
+
+    def send_venue(
+        self,
+        latitude: float,
+        longitude: float,
+        title: str,
+        address: str,
+        foursquare_id: Optional[str] = None,
+        foursquare_type: Optional[str] = None,
+        google_place_id: Optional[str] = None,
+        google_place_type: Optional[str] = None,
+        disable_notification: bool = False,
+        reply_to_message_id: Optional[int] = None,
+    ) -> None:
+        """
+        Sends a venue via Telegram.
+
+        Args:
+            latitude (float): The latitude of the venue.
+            longitude (float): The longitude of the venue.
+            title (str): The name of the venue.
+            address (str): The address of the venue.
+            foursquare_id (str, optional): Foursquare identifier of the venue. Defaults to None.
+            foursquare_type (str, optional): Foursquare type of the venue. Defaults to None.
+            google_place_id (str, optional): Google Places identifier of the venue. Defaults to None.
+            google_place_type (str, optional): Google Places type of the venue. Defaults to None.
+            disable_notification (bool, optional): If True, sends the venue silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
+        payload = {
+            "chat_id": self.chat_id,
+            "latitude": latitude,
+            "longitude": longitude,
+            "title": title,
+            "address": address,
+            "disable_notification": disable_notification,
+        }
+
+        if foursquare_id:
+            payload["foursquare_id"] = foursquare_id
+        if foursquare_type:
+            payload["foursquare_type"] = foursquare_type
+        if google_place_id:
+            payload["google_place_id"] = google_place_id
+        if google_place_type:
+            payload["google_place_type"] = google_place_type
+        if reply_to_message_id:
+            payload["reply_to_message_id"] = reply_to_message_id
+
+        try:
+            self.message_queue.put_nowait(("sendVenue", payload, None))
+            LOGGER.info(f"Venue queued: {title}")
+        except queue.Full:
+            LOGGER.warning(f"Message queue full. Dropping venue: {title}")
+        except Exception:
+            LOGGER.error(f"Error queuing venue:\n{traceback.format_exc()}")
+
+    def send_invoice(
+        self,
+        title: str,
+        description: str,
+        payload: str,
+        provider_token: str,
+        currency: str,
+        prices: List[Dict[str, Any]],
+        start_parameter: Optional[str] = None,
+        photo_url: Optional[str] = None,
+        photo_size: Optional[int] = None,
+        photo_width: Optional[int] = None,
+        photo_height: Optional[int] = None,
+        need_name: bool = False,
+        need_phone_number: bool = False,
+        need_email: bool = False,
+        need_shipping_address: bool = False,
+        send_phone_number_to_provider: bool = False,
+        send_email_to_provider: bool = False,
+        is_flexible: bool = False,
+        disable_notification: bool = False,
+        reply_to_message_id: Optional[int] = None,
+    ) -> None:
+        """
+        Sends an invoice via Telegram.
+
+        Args:
+            title (str): Product name.
+            description (str): Product description.
+            payload (str): Bot-defined invoice payload.
+            provider_token (str): Payments provider token.
+            currency (str): Three-letter ISO 4217 currency code.
+            prices (List[Dict[str, Any]]): Price breakdown (list of dictionaries with 'label' and 'amount' keys).
+            start_parameter (str, optional): Unique deep-linking parameter. Defaults to None.
+            photo_url (str, optional): URL of the product photo. Defaults to None.
+            photo_size (int, optional): Photo size. Defaults to None.
+            photo_width (int, optional): Photo width. Defaults to None.
+            photo_height (int, optional): Photo height. Defaults to None.
+            need_name (bool, optional): If True, requires the user's full name. Defaults to False.
+            need_phone_number (bool, optional): If True, requires the user's phone number. Defaults to False.
+            need_email (bool, optional): If True, requires the user's email address. Defaults to False.
+            need_shipping_address (bool, optional): If True, requires the user's shipping address. Defaults to False.
+            send_phone_number_to_provider (bool, optional): If True, sends the user's phone number to the provider. Defaults to False.
+            send_email_to_provider (bool, optional): If True, sends the user's email to the provider. Defaults to False.
+            is_flexible (bool, optional): If True, allows flexible price. Defaults to False.
+            disable_notification (bool, optional): If True, sends the invoice silently. Defaults to False.
+            reply_to_message_id (int, optional): If provided, replies to the specified message. Defaults to None.
+        """
+        payload = {
+            "chat_id": self.chat_id,
+            "title": title,
+            "description": description,
+            "payload": payload,
+            "provider_token": provider_token,
+            "currency": currency,
+            "prices": prices,
+            "disable_notification": disable_notification,
+        }
+
+        if start_parameter:
+            payload["start_parameter"] = start_parameter
+        if photo_url:
+            payload["photo_url"] = photo_url
+        if photo_size:
+            payload["photo_size"] = photo_size
+        if photo_width:
+            payload["photo_width"] = photo_width
+        if photo_height:
+            payload["photo_height"] = photo_height
+        if need_name:
+            payload["need_name"] = need_name
+        if need_phone_number:
+            payload["need_phone_number"] = need_phone_number
+        if need_email:
+            payload["need_email"] = need_email
+        if need_shipping_address:
+            payload["need_shipping_address"] = need_shipping_address
+        if send_phone_number_to_provider:
+            payload["send_phone_number_to_provider"] = send_phone_number_to_provider
+        if send_email_to_provider:
+            payload["send_email_to_provider"] = send_email_to_provider
+        if is_flexible:
+            payload["is_flexible"] = is_flexible
+        if reply_to_message_id:
+            payload["reply_to_message_id"] = reply_to_message_id
+
+        try:
+            self.message_queue.put_nowait(("sendInvoice", payload, None))
+            LOGGER.info(f"Invoice queued: {title}")
+        except queue.Full:
+            LOGGER.warning(f"Message queue full. Dropping invoice: {title}")
+        except Exception:
+            LOGGER.error(f"Error queuing invoice:\n{traceback.format_exc()}")
 
     def stop(self) -> None:
         """Gracefully shuts down the notifier, ensuring all messages are processed before exiting."""
